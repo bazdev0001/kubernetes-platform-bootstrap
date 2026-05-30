@@ -336,7 +336,7 @@ Please follow the existing file structure and naming conventions. Terraform modu
 
 ## Author
 
-Barry O Young — Senior DevOps Engineer
+Barry Au Yeung — Senior DevOps Engineer
 
 ---
 
