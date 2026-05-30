@@ -1,0 +1,136 @@
+# ArgoCD Helm values — overrides for kubernetes-platform-bootstrap
+#
+# These values are intentionally opinionated for production use.
+# Reference: https://github.com/argoproj/argo-helm/blob/main/charts/argo-cd/values.yaml
+
+global:
+  # Set to match the domain where ArgoCD will be exposed.
+  domain: argocd.REPLACE_WITH_YOUR_DOMAIN
+
+configs:
+  params:
+    # Disable insecure mode so ArgoCD server always terminates TLS.
+    server.insecure: false
+
+  cm:
+    # Allow ArgoCD to manage resources in all namespaces via ApplicationSets.
+    application.resourceTrackingMethod: annotation
+
+    # Status badge support
+    statusbadge.enabled: true
+
+    # Oidc configuration — replace with your identity provider.
+    # url: https://argocd.REPLACE_WITH_YOUR_DOMAIN
+    # oidc.config: |
+    #   name: Okta
+    #   issuer: https://your-org.okta.com
+    #   clientId: REPLACE_WITH_CLIENT_ID
+    #   clientSecret: $oidc.okta.clientSecret
+    #   requestedScopes: [openid, profile, email, groups]
+
+  rbac:
+    policy.default: role:readonly
+    policy.csv: |
+      p, role:org-admin, applications, *, */*, allow
+      p, role:org-admin, clusters, get, *, allow
+      p, role:org-admin, repositories, *, *, allow
+      p, role:org-admin, logs, get, *, allow
+      p, role:org-admin, exec, create, */*, allow
+      g, platform-admins, role:org-admin
+
+server:
+  replicas: 2
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+      nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+    hostname: argocd.REPLACE_WITH_YOUR_DOMAIN
+    tls: true
+
+repoServer:
+  replicas: 2
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  # Enable exec into containers from the ArgoCD UI — disable if not needed.
+  env:
+    - name: ARGOCD_EXEC_TIMEOUT
+      value: "600s"
+
+applicationSet:
+  replicas: 2
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+controller:
+  replicas: 1
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+redis:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+notifications:
+  enabled: true
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+  notifiers:
+    service.slack: |
+      token: $slack-token
+
+  templates:
+    template.app-deployed: |
+      message: |
+        Application {{.app.metadata.name}} has been deployed.
+        Sync status: {{.app.status.sync.status}}
+        Health: {{.app.status.health.status}}
+
+  triggers:
+    trigger.on-deployed: |
+      - description: Trigger notification when application is successfully synced and healthy
+        send:
+          - app-deployed
+        when: app.status.operationState.phase in ['Succeeded'] and app.status.health.status == 'Healthy'

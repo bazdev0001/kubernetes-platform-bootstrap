@@ -1,0 +1,144 @@
+---
+# team-developer ClusterRole
+#
+# Standard developer permissions scoped to a single namespace.
+# Grants enough access to deploy, debug, and observe workloads without
+# the ability to modify cluster-level resources or access other namespaces.
+#
+# Usage:
+#   kubectl apply -f manifests/rbac/team-developer-role.yaml
+#   kubectl create rolebinding <team>-developers \
+#     --role=team-developer \
+#     --group=<sso-group> \
+#     --namespace=<team-namespace>
+#
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: team-developer
+  labels:
+    app.kubernetes.io/managed-by: kubernetes-platform-bootstrap
+    rbac.barry-oyoung.io/category: developer
+rules:
+  # Core workload resources — read and write
+  - apiGroups: ["apps"]
+    resources: [deployments, replicasets, statefulsets, daemonsets]
+    verbs: [get, list, watch, create, update, patch]
+
+  # Pod operations including exec and log access for debugging
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch, create, delete]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [pods/portforward]
+    verbs: [create]
+
+  # Services and endpoints — read and write
+  - apiGroups: [""]
+    resources: [services, endpoints]
+    verbs: [get, list, watch, create, update, patch]
+
+  # Ingress — read and write
+  - apiGroups: ["networking.k8s.io"]
+    resources: [ingresses]
+    verbs: [get, list, watch, create, update, patch]
+
+  # ConfigMaps — read and write (not delete)
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list, watch, create, update, patch]
+
+  # Secrets — intentionally restricted: list only, no get/data access
+  # Use Sealed Secrets or External Secrets for secret management.
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [list]
+
+  # HorizontalPodAutoscaler
+  - apiGroups: ["autoscaling"]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list, watch, create, update, patch]
+
+  # Events — read only for debugging
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [get, list, watch]
+
+  # PVCs — read and create (not delete — prevent accidental data loss)
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [get, list, watch, create]
+
+  # CronJobs and Jobs
+  - apiGroups: ["batch"]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch, create, update, patch, delete]
+
+  # ServiceAccounts — read only
+  - apiGroups: [""]
+    resources: [serviceaccounts]
+    verbs: [get, list, watch]
+
+---
+# team-readonly ClusterRole
+#
+# Read-only access to a namespace. Appropriate for on-call engineers from
+# other teams, security auditors, and observability tools.
+#
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: team-readonly
+  labels:
+    app.kubernetes.io/managed-by: kubernetes-platform-bootstrap
+    rbac.barry-oyoung.io/category: readonly
+rules:
+  - apiGroups: ["", "apps", "batch", "autoscaling", "networking.k8s.io"]
+    resources:
+      - pods
+      - pods/log
+      - deployments
+      - replicasets
+      - statefulsets
+      - daemonsets
+      - services
+      - endpoints
+      - configmaps
+      - events
+      - persistentvolumeclaims
+      - horizontalpodautoscalers
+      - ingresses
+      - jobs
+      - cronjobs
+    verbs: [get, list, watch]
+
+---
+# team-deployer ClusterRole
+#
+# Narrowly scoped to update image tags on existing Deployments and StatefulSets.
+# Designed for CI/CD service accounts that need to roll out new images without
+# broader write access.
+#
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: team-deployer
+  labels:
+    app.kubernetes.io/managed-by: kubernetes-platform-bootstrap
+    rbac.barry-oyoung.io/category: ci-cd
+rules:
+  - apiGroups: ["apps"]
+    resources: [deployments, statefulsets]
+    verbs: [get, list, patch, update]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get, list]

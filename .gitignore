@@ -1,0 +1,66 @@
+# Terraform
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+*.tfplan
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Helm
+*.tgz
+charts/
+Chart.lock
+
+# Kubernetes secrets — never commit raw secrets
+**/secrets/*.yaml
+!**/secrets/README.md
+**/sealed-secrets/raw/
+
+# ArgoCD
+argocd-initial-admin-secret.txt
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Shell history
+.bash_history
+.zsh_history
+
+# Python (used in scripts)
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Logs
+*.log
+logs/
+/tmp/
+
+# Generated docs (regenerate with make docs)
+terraform/eks/README.md
+terraform/gke/README.md
+terraform/aks/README.md
+
+# Local override files for personal config
+*.local.tfvars
+terraform/environments/production.tfvars
+terraform/environments/staging.tfvars
+!terraform/environments/example.tfvars

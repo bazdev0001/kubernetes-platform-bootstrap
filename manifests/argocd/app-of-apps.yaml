@@ -1,0 +1,95 @@
+---
+# App-of-Apps root application.
+#
+# This is the only ArgoCD Application you apply manually. It points at the
+# manifests/applications/ directory in this repo, and ArgoCD will discover
+# and sync every other Application defined there automatically.
+#
+# Usage:
+#   kubectl apply -f manifests/argocd/app-of-apps.yaml
+#
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    # Ensure this app is synced first before any child apps.
+    argocd.argoproj.io/sync-wave: "-10"
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/barry-oyoung/kubernetes-platform-bootstrap
+    targetRevision: HEAD
+    path: manifests/applications
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+
+---
+# ArgoCD Project scoping platform apps to their allowed namespaces and sources.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: Platform infrastructure components managed by the bootstrap repo
+
+  sourceRepos:
+    - "https://github.com/barry-oyoung/kubernetes-platform-bootstrap"
+    - "https://charts.helm.sh/stable"
+    - "https://prometheus-community.github.io/helm-charts"
+    - "https://charts.jetstack.io"
+    - "https://kubernetes.github.io/ingress-nginx"
+    - "https://bitnami-labs.github.io/sealed-secrets"
+    - "https://kubernetes-sigs.github.io/external-dns"
+
+  destinations:
+    - namespace: argocd
+      server: https://kubernetes.default.svc
+    - namespace: monitoring
+      server: https://kubernetes.default.svc
+    - namespace: cert-manager
+      server: https://kubernetes.default.svc
+    - namespace: ingress-nginx
+      server: https://kubernetes.default.svc
+    - namespace: external-dns
+      server: https://kubernetes.default.svc
+    - namespace: sealed-secrets
+      server: https://kubernetes.default.svc
+    - namespace: kube-system
+      server: https://kubernetes.default.svc
+
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: ClusterRole
+    - group: "*"
+      kind: ClusterRoleBinding
+    - group: "*"
+      kind: Namespace
+    - group: "apiextensions.k8s.io"
+      kind: CustomResourceDefinition
+
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+
+  roles:
+    - name: admin
+      description: Full access to the platform project
+      policies:
+        - p, proj:platform:admin, applications, *, platform/*, allow
+      groups:
+        - platform-admins

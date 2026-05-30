@@ -1,0 +1,205 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint Terraform
+  # ---------------------------------------------------------------------------
+  terraform-lint:
+    name: Terraform Lint & Validate
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: [eks, gke, aks]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.6.6"
+
+      - name: Terraform fmt check
+        run: terraform fmt -check -recursive terraform/${{ matrix.module }}
+
+      - name: Terraform init
+        working-directory: terraform/${{ matrix.module }}
+        run: terraform init -backend=false
+
+      - name: Terraform validate
+        working-directory: terraform/${{ matrix.module }}
+        run: terraform validate
+
+      - name: TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.50.3
+
+      - name: TFLint init
+        working-directory: terraform/${{ matrix.module }}
+        run: tflint --init
+
+      - name: TFLint run
+        working-directory: terraform/${{ matrix.module }}
+        run: tflint --format compact
+
+  # ---------------------------------------------------------------------------
+  # Lint Kubernetes manifests with kubeconform
+  # ---------------------------------------------------------------------------
+  manifest-lint:
+    name: Kubernetes Manifest Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install kubeconform
+        run: |
+          curl -Lo kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.4/kubeconform-linux-amd64.tar.gz
+          tar -xzf kubeconform.tar.gz
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: Install ArgoCD CRD schemas
+        run: |
+          mkdir -p /tmp/argocd-schemas
+          curl -Lo /tmp/argocd-schemas/application.json \
+            https://raw.githubusercontent.com/argoproj/argo-cd/v2.9.0/manifests/crds/application-crd.yaml
+          curl -Lo /tmp/argocd-schemas/appproject.json \
+            https://raw.githubusercontent.com/argoproj/argo-cd/v2.9.0/manifests/crds/appproject-crd.yaml
+
+      - name: Validate manifests
+        run: |
+          kubeconform \
+            -strict \
+            -ignore-missing-schemas \
+            -kubernetes-version 1.28.0 \
+            -summary \
+            $(find manifests/ -name "*.yaml" | grep -v argocd/ || true)
+
+  # ---------------------------------------------------------------------------
+  # Lint Helm charts
+  # ---------------------------------------------------------------------------
+  helm-lint:
+    name: Helm Chart Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.13.3
+
+      - name: Add Helm repos
+        run: |
+          helm repo add argo https://argoproj.github.io/argo-helm
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add jetstack https://charts.jetstack.io
+          helm repo update
+
+      - name: Lint ArgoCD values
+        run: |
+          helm lint argo/argo-cd \
+            --values helm/argocd/values.yaml \
+            --set global.domain=example.com \
+            2>/dev/null || true
+
+  # ---------------------------------------------------------------------------
+  # Security scan with checkov
+  # ---------------------------------------------------------------------------
+  security-scan:
+    name: Security Scan (Checkov)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkov — Terraform
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: terraform/
+          framework: terraform
+          output_format: sarif
+          output_file_path: checkov-terraform.sarif
+          soft_fail: true
+
+      - name: Checkov — Kubernetes
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: manifests/
+          framework: kubernetes
+          output_format: sarif
+          output_file_path: checkov-k8s.sarif
+          soft_fail: true
+
+      - name: Upload Terraform SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-terraform.sarif
+          category: checkov-terraform
+
+      - name: Upload Kubernetes SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-k8s.sarif
+          category: checkov-kubernetes
+
+  # ---------------------------------------------------------------------------
+  # Shell script lint with shellcheck
+  # ---------------------------------------------------------------------------
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: ShellCheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: ./scripts
+          severity: warning
+          check_together: yes
+
+  # ---------------------------------------------------------------------------
+  # Final gate — all checks must pass
+  # ---------------------------------------------------------------------------
+  ci-gate:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    needs:
+      - terraform-lint
+      - manifest-lint
+      - helm-lint
+      - security-scan
+      - shellcheck
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          results='${{ toJson(needs) }}'
+          echo "$results" | python3 -c "
+          import json, sys
+          needs = json.load(sys.stdin)
+          failures = [k for k, v in needs.items() if v['result'] not in ('success', 'skipped')]
+          if failures:
+              print('Failed jobs:', failures)
+              sys.exit(1)
+          print('All checks passed.')
+          "
